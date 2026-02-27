@@ -101,3 +101,13 @@ def test_build_runner_from_config() -> None:
     assert isinstance(runner, KimiRunner)
     assert runner.model == "kimi-k2"
     assert runner.allowed_tools == ["Bash"]
+
+
+def test_build_runner_defaults() -> None:
+    """Test that sensible defaults are applied."""
+    config = {}
+    runner = BACKEND.build_runner(config, Path("test.toml"))
+
+    assert isinstance(runner, KimiRunner)
+    assert runner.model == "kimi-for-coding"  # Default model
+    assert runner.dangerously_skip_permissions is True  # Default to skip for automation

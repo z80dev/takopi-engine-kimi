@@ -583,12 +583,14 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 def build_runner(config: EngineConfig, _config_path: Path) -> Runner:
     kimi_cmd = shutil.which("kimi") or "kimi"
 
-    model = config.get("model")
+    # Default to kimi-for-coding model
+    model = config.get("model") or "kimi-for-coding"
     if "allowed_tools" in config:
         allowed_tools = config.get("allowed_tools")
     else:
         allowed_tools = DEFAULT_ALLOWED_TOOLS
-    dangerously_skip_permissions = config.get("dangerously_skip_permissions") is True
+    # Default to skipping permissions for smoother automation
+    dangerously_skip_permissions = config.get("dangerously_skip_permissions", True) is True
     use_api_billing = config.get("use_api_billing") is True
     title = str(model) if model is not None else "kimi"
 
