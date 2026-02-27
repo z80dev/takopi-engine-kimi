@@ -1,10 +1,10 @@
-"""Tests for takopi-kimi-runner."""
+"""Tests for takopi-engine-kimi."""
 
 from pathlib import Path
 
 import pytest
 
-from takopi_kimi_runner import (
+from takopi_engine_kimi import (
     BACKEND,
     KimiRunner,
     KimiStreamState,

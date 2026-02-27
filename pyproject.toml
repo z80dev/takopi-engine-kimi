@@ -1,7 +1,7 @@
 [project]
-name = "takopi-kimi-runner"
+name = "takopi-engine-kimi"
 version = "0.1.0"
-description = "Kimi CLI runner plugin for Takopi"
+description = "Kimi CLI engine plugin for Takopi"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.14"
@@ -16,14 +16,14 @@ dev = [
 ]
 
 [project.entry-points."takopi.engine_backends"]
-kimi = "takopi_kimi_runner:BACKEND"
+kimi = "takopi_engine_kimi:BACKEND"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/takopi_kimi_runner"]
+packages = ["src/takopi_engine_kimi"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,46 +1,46 @@
-# takopi-kimi-runner
+# takopi-engine-kimi
 
-[Kimi CLI](https://github.com/MoonshotAI/kimi-cli) runner plugin for [Takopi](https://github.com/banteg/takopi).
+[Kimi CLI](https://github.com/MoonshotAI/kimi-cli) engine plugin for [Takopi](https://github.com/banteg/takopi).
 
 ## Installation
 
 ### With pip
 
 ```bash
-pip install takopi-kimi-runner
+pip install takopi-engine-kimi
 ```
 
 ### With uv (in a project)
 
 ```bash
 # Add to your project's dependencies
-uv add takopi takopi-kimi-runner
+uv add takopi takopi-engine-kimi
 
 # Or from git (before it's published)
-uv add takopi git+https://github.com/yourusername/takopi-kimi-runner
+uv add takopi git+https://github.com/yourusername/takopi-engine-kimi
 
 # Or from local path during development
-uv add takopi /path/to/takopi-kimi-runner
+uv add takopi /path/to/takopi-engine-kimi
 ```
 
 ### With uv (as a tool)
 
 ```bash
 # Install takopi with the kimi plugin
-uv tool install takopi --with takopi-kimi-runner
+uv tool install takopi --with takopi-engine-kimi
 
 # Or from git
-uv tool install takopi --with git+https://github.com/yourusername/takopi-kimi-runner
+uv tool install takopi --with git+https://github.com/yourusername/takopi-engine-kimi
 
 # Or upgrade an existing installation
-uv tool upgrade takopi --with takopi-kimi-runner
+uv tool upgrade takopi --with takopi-engine-kimi
 ```
 
 ### With uv tool run (temporary)
 
 ```bash
 # Run takopi with kimi support without installing
-uv tool run --with takopi-kimi-runner --from takopi takopi
+uv tool run --with takopi-engine-kimi --from takopi takopi
 ```
 
 ## Usage
