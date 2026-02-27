@@ -33,112 +33,49 @@ _RESUME_RE = re.compile(
 # Schema (msgspec models for Kimi CLI stream-json output)
 # =============================================================================
 
-class StreamTextBlock(
-    msgspec.Struct, tag="text", tag_field="type", forbid_unknown_fields=False
-):
+class ToolCallFunction(msgspec.Struct, forbid_unknown_fields=False):
+    name: str
+    arguments: str
+
+
+class ToolCall(msgspec.Struct, forbid_unknown_fields=False):
+    type: str
+    id: str
+    function: ToolCallFunction
+
+
+class TextContent(msgspec.Struct, tag="text", tag_field="type", forbid_unknown_fields=False):
     text: str
 
 
-class StreamThinkingBlock(
-    msgspec.Struct, tag="thinking", tag_field="type", forbid_unknown_fields=False
-):
-    thinking: str
-    signature: str | None = None
+class ThinkContent(msgspec.Struct, tag="think", tag_field="type", forbid_unknown_fields=False):
+    think: str
+    encrypted: str | None = None
 
 
-class StreamToolUseBlock(
-    msgspec.Struct, tag="tool_use", tag_field="type", forbid_unknown_fields=False
-):
-    id: str
-    name: str
-    input: dict[str, Any]
+class ToolResultContent(msgspec.Struct, tag="text", tag_field="type", forbid_unknown_fields=False):
+    text: str
 
 
-class StreamToolResultBlock(
-    msgspec.Struct, tag="tool_result", tag_field="type", forbid_unknown_fields=False
-):
-    tool_use_id: str
-    content: str | list[dict[str, Any]] | None = None
-    is_error: bool | None = None
-
-
-type StreamContentBlock = (
-    StreamTextBlock | StreamThinkingBlock | StreamToolUseBlock | StreamToolResultBlock
-)
-
-
-class StreamUserMessageBody(msgspec.Struct, forbid_unknown_fields=False):
+class ToolMessage(msgspec.Struct, forbid_unknown_fields=False):
     role: str
-    content: str | list[StreamContentBlock]
+    content: list[ToolResultContent]
+    tool_call_id: str
 
 
-class StreamAssistantMessageBody(msgspec.Struct, forbid_unknown_fields=False):
+class AssistantMessage(msgspec.Struct, forbid_unknown_fields=False):
     role: str
-    content: list[StreamContentBlock]
-    model: str | None = None
-    error: str | None = None
+    content: list[TextContent | ThinkContent]
+    tool_calls: list[ToolCall] | None = None
+    encrypted: str | None = None
 
 
-class StreamUserMessage(
-    msgspec.Struct, tag="user", tag_field="type", forbid_unknown_fields=False
-):
-    message: StreamUserMessageBody
-    uuid: str | None = None
-    parent_tool_use_id: str | None = None
-    session_id: str | None = None
-
-
-class StreamAssistantMessage(
-    msgspec.Struct, tag="assistant", tag_field="type", forbid_unknown_fields=False
-):
-    message: StreamAssistantMessageBody
-    parent_tool_use_id: str | None = None
-    uuid: str | None = None
-    session_id: str | None = None
-
-
-class StreamSystemMessage(
-    msgspec.Struct, tag="system", tag_field="type", forbid_unknown_fields=False
-):
-    subtype: str
-    session_id: str | None = None
-    uuid: str | None = None
-    cwd: str | None = None
-    tools: list[str] | None = None
-    mcp_servers: list[Any] | None = None
-    model: str | None = None
-    permissionMode: str | None = None
-    output_style: str | None = None
-    apiKeySource: str | None = None
-
-
-class StreamResultMessage(
-    msgspec.Struct, tag="result", tag_field="type", forbid_unknown_fields=False
-):
-    subtype: str
-    duration_ms: int
-    duration_api_ms: int
-    is_error: bool
-    num_turns: int
-    session_id: str | None = None
-    total_cost_usd: float | None = None
-    usage: dict[str, Any] | None = None
-    result: str | None = None
-    structured_output: Any = None
-
-
-type StreamJsonMessage = (
-    StreamUserMessage
-    | StreamAssistantMessage
-    | StreamSystemMessage
-    | StreamResultMessage
-)
-
-_DECODER = msgspec.json.Decoder(StreamJsonMessage)
-
-
-def decode_stream_json_line(line: str | bytes) -> StreamJsonMessage:
-    return _DECODER.decode(line)
+def decode_stream_json_line(line: str | bytes) -> dict[str, Any]:
+    """Decode a JSON line from Kimi CLI."""
+    if isinstance(line, bytes):
+        line = line.decode("utf-8", errors="replace")
+    import json
+    return json.loads(line)
 
 
 # =============================================================================
@@ -151,28 +88,17 @@ class KimiStreamState:
     pending_actions: dict[str, Action] = field(default_factory=dict)
     last_assistant_text: str | None = None
     note_seq: int = 0
+    session_id: str | None = None
 
 
-def _normalize_tool_result(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str) and text:
-                    parts.append(text)
-            elif isinstance(item, str):
-                parts.append(item)
-        return "\n".join(part for part in parts if part)
-    if isinstance(content, dict):
-        text = content.get("text")
-        if isinstance(text, str):
-            return text
-    return str(content)
+def _normalize_tool_result(content: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
 
 
 def _coerce_comma_list(value: Any) -> str | None:
@@ -192,216 +118,115 @@ def _tool_kind_and_title(
     return tool_kind_and_title(name, tool_input, path_keys=("file_path", "path"))
 
 
-def _tool_action(
-    content: StreamToolUseBlock,
-    *,
-    parent_tool_use_id: str | None,
-) -> Action:
-    tool_id = content.id
-    tool_name = str(content.name or "tool")
-    tool_input = content.input
-
-    kind, title = _tool_kind_and_title(tool_name, tool_input)
-
-    detail: dict[str, Any] = {
-        "name": tool_name,
-        "input": tool_input,
-    }
-    if parent_tool_use_id:
-        detail["parent_tool_use_id"] = parent_tool_use_id
-
-    if kind == "file_change":
-        path = tool_input_path(tool_input, path_keys=("file_path", "path"))
-        if path:
-            detail["changes"] = [{"path": path, "kind": "update"}]
-
-    return Action(id=tool_id, kind=kind, title=title, detail=detail)
-
-
-def _tool_result_event(
-    content: StreamToolResultBlock,
-    *,
-    action: Action,
-    factory: EventFactory,
-) -> TakopiEvent:
-    is_error = content.is_error is True
-    raw_result = content.content
-    normalized = _normalize_tool_result(raw_result)
-    preview = normalized
-
-    detail = action.detail | {
-        "tool_use_id": content.tool_use_id,
-        "result_preview": preview,
-        "result_len": len(normalized),
-        "is_error": is_error,
-    }
-    return factory.action_completed(
-        action_id=action.id,
-        kind=action.kind,
-        title=action.title,
-        ok=not is_error,
-        detail=detail,
-    )
-
-
-def _extract_error(event: StreamResultMessage) -> str | None:
-    if event.is_error:
-        if isinstance(event.result, str) and event.result:
-            return event.result
-        subtype = event.subtype
-        if subtype:
-            return f"kimi run failed ({subtype})"
-        return "kimi run failed"
-    return None
-
-
-def _usage_payload(event: StreamResultMessage) -> dict[str, Any]:
-    usage: dict[str, Any] = {}
-    for key in (
-        "total_cost_usd",
-        "duration_ms",
-        "duration_api_ms",
-        "num_turns",
-    ):
-        value = getattr(event, key, None)
-        if value is not None:
-            usage[key] = value
-    if event.usage is not None:
-        usage["usage"] = event.usage
-    return usage
+def _extract_tool_input(arguments: str) -> dict[str, Any]:
+    """Parse tool arguments from JSON string."""
+    import json
+    try:
+        return json.loads(arguments)
+    except json.JSONDecodeError:
+        return {"raw": arguments}
 
 
 def translate_kimi_event(
-    event: StreamJsonMessage,
+    event: dict[str, Any],
     *,
     title: str,
     state: KimiStreamState,
     factory: EventFactory,
 ) -> list[TakopiEvent]:
-    match event:
-        case StreamSystemMessage(subtype=subtype):
-            if subtype != "init":
-                return []
-            session_id = event.session_id
-            if not session_id:
-                return []
-            meta: dict[str, Any] = {}
-            for key in (
-                "cwd",
-                "tools",
-                "permissionMode",
-                "output_style",
-                "apiKeySource",
-                "mcp_servers",
-            ):
-                value = getattr(event, key, None)
-                if value is not None:
-                    meta[key] = value
-            model = event.model
-            token = ResumeToken(engine=ENGINE, value=session_id)
-            event_title = str(model) if isinstance(model, str) and model else title
-            return [factory.started(token, title=event_title, meta=meta or None)]
-        case StreamAssistantMessage(
-            message=message, parent_tool_use_id=parent_tool_use_id
-        ):
-            out: list[TakopiEvent] = []
-            for content in message.content:
-                match content:
-                    case StreamToolUseBlock():
-                        action = _tool_action(
-                            content,
-                            parent_tool_use_id=parent_tool_use_id,
+    role = event.get("role")
+    
+    if role == "assistant":
+        out: list[TakopiEvent] = []
+        content = event.get("content", [])
+        
+        # Extract thinking blocks
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "think":
+                think_text = item.get("think", "")
+                if think_text:
+                    state.note_seq += 1
+                    action_id = f"kimi.thinking.{state.note_seq}"
+                    out.append(
+                        factory.action_completed(
+                            action_id=action_id,
+                            kind="note",
+                            title=think_text,
+                            ok=True,
+                            detail={},
                         )
-                        state.pending_actions[action.id] = action
-                        out.append(
-                            factory.action_started(
-                                action_id=action.id,
-                                kind=action.kind,
-                                title=action.title,
-                                detail=action.detail,
-                            )
+                    )
+            elif isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                if text:
+                    state.last_assistant_text = text
+        
+        # Extract tool calls
+        tool_calls = event.get("tool_calls", [])
+        if tool_calls:
+            for tool_call in tool_calls:
+                if isinstance(tool_call, dict):
+                    tool_id = tool_call.get("id", "unknown")
+                    function = tool_call.get("function", {})
+                    tool_name = function.get("name", "tool")
+                    arguments = function.get("arguments", "{}")
+                    tool_input = _extract_tool_input(arguments)
+                    
+                    kind, title_str = _tool_kind_and_title(tool_name, tool_input)
+                    detail: dict[str, Any] = {
+                        "name": tool_name,
+                        "input": tool_input,
+                    }
+                    
+                    if kind == "file_change":
+                        path = tool_input_path(tool_input, path_keys=("file_path", "path"))
+                        if path:
+                            detail["changes"] = [{"path": path, "kind": "update"}]
+                    
+                    action = Action(id=tool_id, kind=kind, title=title_str, detail=detail)
+                    state.pending_actions[tool_id] = action
+                    out.append(
+                        factory.action_started(
+                            action_id=tool_id,
+                            kind=kind,
+                            title=title_str,
+                            detail=detail,
                         )
-                    case StreamThinkingBlock(
-                        thinking=thinking, signature=signature
-                    ):
-                        if not thinking:
-                            continue
-                        state.note_seq += 1
-                        action_id = f"kimi.thinking.{state.note_seq}"
-                        detail: dict[str, Any] = {}
-                        if parent_tool_use_id:
-                            detail["parent_tool_use_id"] = parent_tool_use_id
-                        if signature:
-                            detail["signature"] = signature
-                        out.append(
-                            factory.action_completed(
-                                action_id=action_id,
-                                kind="note",
-                                title=thinking,
-                                ok=True,
-                                detail=detail,
-                            )
-                        )
-                    case StreamTextBlock(text=text):
-                        if text:
-                            state.last_assistant_text = text
-                    case _:
-                        continue
-            return out
-        case StreamUserMessage(message=message):
-            if not isinstance(message.content, list):
-                return []
-            out: list[TakopiEvent] = []
-            for content in message.content:
-                if not isinstance(content, StreamToolResultBlock):
-                    continue
-                tool_use_id = content.tool_use_id
-                action = state.pending_actions.pop(tool_use_id, None)
-                if action is None:
-                    action = Action(
-                        id=tool_use_id,
-                        kind="tool",
-                        title="tool result",
-                        detail={},
                     )
-                out.append(
-                    _tool_result_event(
-                        content,
-                        action=action,
-                        factory=factory,
-                    )
-                )
-            return out
-        case StreamResultMessage():
-            ok = not event.is_error
-            result_text = event.result or ""
-            if ok and not result_text and state.last_assistant_text:
-                result_text = state.last_assistant_text
-
-            session_id = event.session_id
-            if session_id is None:
-                return [
-                    factory.completed_error(
-                        error="kimi result event missing session_id",
-                        answer=result_text,
-                    )
-                ]
-
-            resume = ResumeToken(engine=ENGINE, value=session_id)
-            error = None if ok else _extract_error(event)
-            usage = _usage_payload(event)
-
-            return [
-                factory.completed(
-                    ok=ok,
-                    answer=result_text,
-                    resume=resume,
-                    error=error,
-                    usage=usage or None,
-                )
-            ]
-        case _:
-            return []
+        
+        return out
+    
+    elif role == "tool":
+        tool_call_id = event.get("tool_call_id", "unknown")
+        content = event.get("content", [])
+        result_text = _normalize_tool_result(content)
+        
+        action = state.pending_actions.pop(tool_call_id, None)
+        if action is None:
+            action = Action(
+                id=tool_call_id,
+                kind="tool",
+                title="tool result",
+                detail={},
+            )
+        
+        detail = action.detail | {
+            "tool_use_id": tool_call_id,
+            "result_preview": result_text[:500],
+            "result_len": len(result_text),
+        }
+        
+        return [
+            factory.action_completed(
+                action_id=action.id,
+                kind=action.kind,
+                title=action.title,
+                ok=True,
+                detail=detail,
+            )
+        ]
+    
+    return []
 
 
 @dataclass(slots=True)
@@ -424,21 +249,26 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 
     def _build_args(self, prompt: str, resume: ResumeToken | None) -> list[str]:
         run_options = get_run_options()
-        args: list[str] = ["-p", "--output-format", "stream-json", "--verbose"]
+        # --print is required for --output-format to work
+        # -p passes the prompt
+        args: list[str] = ["--print", "--output-format", "stream-json"]
+        
         if resume is not None:
             args.extend(["--resume", resume.value])
+        
         model = self.model
         if run_options is not None and run_options.model:
             model = run_options.model
         if model is not None:
             args.extend(["--model", str(model)])
-        allowed_tools = _coerce_comma_list(self.allowed_tools)
-        if allowed_tools is not None:
-            args.extend(["--allowedTools", allowed_tools])
+        
+        # Note: kimi doesn't have --allowedTools, tools are configured via config
+        
         if self.yolo is True:
             args.append("--yolo")
-        args.append("--")
-        args.append(prompt)
+        
+        # Pass prompt via -p
+        args.extend(["-p", prompt])
         return args
 
     def command(self) -> str:
@@ -485,7 +315,7 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         self,
         *,
         line: bytes,
-    ) -> StreamJsonMessage:
+    ) -> dict[str, Any]:
         return decode_stream_json_line(line)
 
     def decode_error_events(
@@ -522,12 +352,27 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 
     def translate(
         self,
-        data: StreamJsonMessage,
+        data: dict[str, Any],
         *,
         state: KimiStreamState,
         resume: ResumeToken | None,
         found_session: ResumeToken | None,
     ) -> list[TakopiEvent]:
+        # Emit started event on first assistant message if not started
+        if state.session_id is None and data.get("role") == "assistant":
+            state.session_id = "kimi-session"
+            started = state.factory.started(
+                resume=ResumeToken(engine=ENGINE, value=state.session_id),
+                title=self.session_title,
+            )
+            events = translate_kimi_event(
+                data,
+                title=self.session_title,
+                state=state,
+                factory=state.factory,
+            )
+            return [started, *events]
+        
         return translate_kimi_event(
             data,
             title=self.session_title,
@@ -570,10 +415,9 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
                 )
             ]
 
-        message = "kimi finished without a result event"
+        message = "kimi finished"
         return [
-            state.factory.completed_error(
-                error=message,
+            state.factory.completed_ok(
                 answer=state.last_assistant_text or "",
                 resume=found_session,
             )

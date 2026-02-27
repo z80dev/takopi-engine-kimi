@@ -1,5 +1,6 @@
 """Tests for takopi-engine-kimi."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -20,40 +21,63 @@ def test_backend_attributes() -> None:
     assert BACKEND.build_runner is not None
 
 
-def test_decode_system_init() -> None:
-    line = b'{"type":"system","subtype":"init","session_id":"test-123","model":"kimi-k2"}'
+def test_decode_assistant_message() -> None:
+    data = {
+        "role": "assistant",
+        "content": [
+            {"type": "think", "think": "Let me analyze this."},
+            {"type": "text", "text": "I'll help you!"},
+        ],
+    }
+    line = json.dumps(data).encode()
     event = decode_stream_json_line(line)
-    assert event.subtype == "init"
-    assert event.session_id == "test-123"
-    assert event.model == "kimi-k2"
+    assert event["role"] == "assistant"
+    assert len(event["content"]) == 2
 
 
-def test_translate_system_init_emits_started() -> None:
+def test_translate_assistant_with_think() -> None:
     state = KimiStreamState()
-    line = b'{"type":"system","subtype":"init","session_id":"test-123","model":"kimi-k2","cwd":"/home/test"}'
-    event = decode_stream_json_line(line)
+    data = {
+        "role": "assistant",
+        "content": [
+            {"type": "think", "think": "Analyzing the request."},
+            {"type": "text", "text": "Done!"},
+        ],
+    }
 
     result = translate_kimi_event(
-        event,
+        data,
         title="kimi",
         state=state,
         factory=state.factory,
     )
 
+    # Should have thinking note + text storage (no events for text)
     assert len(result) == 1
-    assert isinstance(result[0], StartedEvent)
-    started = result[0]
-    assert started.resume.value == "test-123"
-    assert started.title == "kimi-k2"
+    assert isinstance(result[0], ActionEvent)
+    assert result[0].action.kind == "note"
+    assert result[0].action.title == "Analyzing the request."
 
 
-def test_translate_assistant_with_tool_use() -> None:
+def test_translate_assistant_with_tool_call() -> None:
     state = KimiStreamState()
-    line = b'''{"type":"assistant","session_id":"test-123","message":{"role":"assistant","model":"kimi-k2","content":[{"type":"tool_use","id":"tool_1","name":"Bash","input":{"command":"ls -la"}}]}}'''
-    event = decode_stream_json_line(line)
+    data = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": "I'll run a command."}],
+        "tool_calls": [
+            {
+                "type": "function",
+                "id": "tool_abc123",
+                "function": {
+                    "name": "Bash",
+                    "arguments": json.dumps({"command": "ls -la"}),
+                },
+            }
+        ],
+    }
 
     result = translate_kimi_event(
-        event,
+        data,
         title="kimi",
         state=state,
         factory=state.factory,
@@ -62,28 +86,54 @@ def test_translate_assistant_with_tool_use() -> None:
     assert len(result) == 1
     assert isinstance(result[0], ActionEvent)
     assert result[0].action.kind == "command"
-    assert result[0].action.id == "tool_1"
+    assert result[0].action.id == "tool_abc123"
+    assert result[0].phase == "started"
 
 
-def test_translate_result_success() -> None:
+def test_translate_tool_result() -> None:
     state = KimiStreamState()
-    state.last_assistant_text = "Done!"
-    line = b'{"type":"result","subtype":"success","session_id":"test-123","is_error":false,"duration_ms":1000,"duration_api_ms":800,"num_turns":1,"result":"Done!"}'
-    event = decode_stream_json_line(line)
+    # First add a pending action
+    from takopi.model import Action
+
+    state.pending_actions["tool_abc123"] = Action(
+        id="tool_abc123",
+        kind="command",
+        title="ls -la",
+        detail={"name": "Bash", "input": {"command": "ls -la"}},
+    )
+
+    data = {
+        "role": "tool",
+        "tool_call_id": "tool_abc123",
+        "content": [{"type": "text", "text": "file1.py\nfile2.py"}],
+    }
 
     result = translate_kimi_event(
-        event,
+        data,
         title="kimi",
         state=state,
         factory=state.factory,
     )
 
     assert len(result) == 1
-    assert isinstance(result[0], CompletedEvent)
-    completed = result[0]
-    assert completed.ok is True
-    assert completed.answer == "Done!"
-    assert completed.resume.value == "test-123"
+    assert isinstance(result[0], ActionEvent)
+    assert result[0].phase == "completed"
+    assert result[0].ok is True
+    assert "tool_abc123" not in state.pending_actions
+
+
+def test_runner_build_args() -> None:
+    runner = KimiRunner(kimi_cmd="kimi", model="kimi-k2", yolo=True)
+    args = runner.build_args("test prompt", None, state=KimiStreamState())
+
+    assert "--print" in args
+    assert "--output-format" in args
+    assert "stream-json" in args
+    assert "--model" in args
+    assert "kimi-k2" in args
+    assert "--yolo" in args
+    assert "-p" in args
+    assert "test prompt" in args
 
 
 def test_runner_resume_format() -> None:
