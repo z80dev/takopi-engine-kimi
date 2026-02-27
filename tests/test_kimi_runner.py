@@ -110,4 +110,13 @@ def test_build_runner_defaults() -> None:
 
     assert isinstance(runner, KimiRunner)
     assert runner.model == "kimi-for-coding"  # Default model
-    assert runner.dangerously_skip_permissions is True  # Default to skip for automation
+    assert runner.yolo is False  # Default to False for safety
+
+
+def test_build_runner_with_yolo() -> None:
+    """Test that yolo config is passed through."""
+    config = {"yolo": True}
+    runner = BACKEND.build_runner(config, Path("test.toml"))
+
+    assert isinstance(runner, KimiRunner)
+    assert runner.yolo is True

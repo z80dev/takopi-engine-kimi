@@ -45,26 +45,31 @@ uv tool run --with takopi-engine-kimi --from takopi takopi
 
 ## Usage
 
-Once installed, the `kimi` engine is automatically available. The plugin uses sensible defaults:
+Once installed, the `kimi` engine is automatically available. The plugin defaults to:
 
 - **Model**: `kimi-for-coding` (Kimi's coding-optimized model)
-- **Permissions**: Automatically skipped for smoother automation
 
 Minimal configuration in `takopi.toml`:
 
 ```toml
 [engines.kimi]
 # Uses "kimi-for-coding" by default
-# Permissions are automatically skipped by default
 ```
 
-Override defaults if needed:
+Enable auto-approval (yolo mode):
 
 ```toml
 [engines.kimi]
-model = "kimi-k2"  # Use a different model
+yolo = true  # Auto-approve all actions
+```
+
+Full configuration options:
+
+```toml
+[engines.kimi]
+model = "kimi-for-coding"  # Or "kimi-k2", etc.
 allowed_tools = ["Bash", "Read", "Edit", "Write"]
-dangerously_skip_permissions = false  # Require confirmations
+yolo = true  # Auto-approve all actions
 ```
 
 ## Verification
@@ -83,7 +88,7 @@ uv run python -c "from takopi.engines import list_backend_ids; print(list_backen
 |--------|------|---------|-------------|
 | `model` | string | `kimi-for-coding` | Kimi model to use |
 | `allowed_tools` | list[string] | `["Bash", "Read", "Edit", "Write"]` | Tools to allow |
-| `dangerously_skip_permissions` | boolean | `true` | Skip permission prompts |
+| `yolo` | boolean | `false` | Auto-approve all actions (Kimi's `--yolo` flag) |
 | `use_api_billing` | boolean | `false` | Use API billing mode |
 
 ## Requirements

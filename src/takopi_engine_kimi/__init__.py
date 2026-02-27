@@ -412,7 +412,7 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
     kimi_cmd: str = "kimi"
     model: str | None = None
     allowed_tools: list[str] | None = None
-    dangerously_skip_permissions: bool = False
+    yolo: bool = False
     use_api_billing: bool = False
     session_title: str = "kimi"
     logger = logger
@@ -435,8 +435,8 @@ class KimiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         allowed_tools = _coerce_comma_list(self.allowed_tools)
         if allowed_tools is not None:
             args.extend(["--allowedTools", allowed_tools])
-        if self.dangerously_skip_permissions is True:
-            args.append("--dangerously-skip-permissions")
+        if self.yolo is True:
+            args.append("--yolo")
         args.append("--")
         args.append(prompt)
         return args
@@ -589,8 +589,8 @@ def build_runner(config: EngineConfig, _config_path: Path) -> Runner:
         allowed_tools = config.get("allowed_tools")
     else:
         allowed_tools = DEFAULT_ALLOWED_TOOLS
-    # Default to skipping permissions for smoother automation
-    dangerously_skip_permissions = config.get("dangerously_skip_permissions", True) is True
+    # Kimi CLI uses --yolo flag for auto-approving actions
+    yolo = config.get("yolo") is True
     use_api_billing = config.get("use_api_billing") is True
     title = str(model) if model is not None else "kimi"
 
@@ -598,7 +598,7 @@ def build_runner(config: EngineConfig, _config_path: Path) -> Runner:
         kimi_cmd=kimi_cmd,
         model=model,
         allowed_tools=allowed_tools,
-        dangerously_skip_permissions=dangerously_skip_permissions,
+        yolo=yolo,
         use_api_billing=use_api_billing,
         session_title=title,
     )
